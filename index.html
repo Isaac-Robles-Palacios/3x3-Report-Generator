@@ -61,6 +61,7 @@
     <p class="note" style="margin:6px 0 0">Tags make sorting more accurate: <code>done:</code> or <code>+</code> = goal, <code>blocked:</code> or <code>issue:</code> = blocker, <code>next:</code> or <code>&gt;</code> = objective, <code>!!</code> = top priority. Untagged lines are sorted by keywords like "shipped", "waiting on" and "will".</p>
     <label for="prev">Last week's "next week" objectives (optional, so slipped items get flagged)</label>
     <textarea id="prev" style="min-height:70px"></textarea>
+    <p class="note" id="prevNote" style="margin:4px 0 0"></p>
 
     <div class="actions">
       <button class="primary" id="sort">Sort my notes into the table (no AI, no key)</button>
@@ -101,11 +102,26 @@
       <tbody></tbody>
     </table>
     <div class="actions no-print">
+      <button class="primary" id="saveLog">Save to log</button>
       <button id="copyEmail">Copy for email</button>
       <button id="copyMd">Copy as Markdown</button>
       <button id="print">Print / Save PDF</button>
     </div>
     <div id="extras" class="no-print" style="display:none;margin-top:16px"></div>
+  </section>
+
+  <section class="card no-print" id="logCard">
+    <h2>3. Log <span class="note">(saved only in this browser, never uploaded)</span></h2>
+    <p class="note" style="margin:0 0 8px">Save each week's report here. Next time you open this page, last week's objectives fill in automatically so slipped items get flagged.</p>
+    <div id="logMsg" class="note" role="status" style="min-height:1.4em"></div>
+    <div id="logList"></div>
+    <div class="actions">
+      <button id="logMd">Copy log as Markdown</button>
+      <button id="logExport">Export backup</button>
+      <button id="logImportBtn">Import backup</button>
+      <input type="file" id="logImport" accept="application/json,.json" hidden>
+      <button id="logClear">Clear log</button>
+    </div>
   </section>
 </main>
 
@@ -391,6 +407,211 @@
   });
 
   $('print').addEventListener('click', function () { window.print(); });
+
+  // ---- weekly log (stored in this browser only) ----
+  // BEGIN-LOG
+  var LOG_KEY = 'x3_log';
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  function weekLabel(d) {
+    var mon = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+    return 'Week of ' + MONTHS[mon.getMonth()] + ' ' + mon.getDate() + ', ' + mon.getFullYear();
+  }
+
+  function cleanList(a) {
+    var out = [];
+    if (!Array.isArray(a)) a = [];
+    for (var i = 0; i < 3; i++) out.push(typeof a[i] === 'string' ? a[i].slice(0, 1000) : '');
+    return out;
+  }
+
+  function sanitizeEntry(e) {
+    if (!e || typeof e !== 'object' || !e.data || typeof e.data !== 'object') return null;
+    var week = typeof e.week === 'string' ? e.week.trim().slice(0, 100) : '';
+    if (!week) return null;
+    var saved = typeof e.saved === 'string' && !isNaN(Date.parse(e.saved)) ? e.saved : new Date(0).toISOString();
+    return {
+      week: week,
+      name: typeof e.name === 'string' ? e.name.slice(0, 100) : '',
+      saved: saved,
+      data: { goals: cleanList(e.data.goals), blockers: cleanList(e.data.blockers), objectives: cleanList(e.data.objectives) }
+    };
+  }
+
+  // Insert or replace by week label; newest saved first.
+  function upsertEntry(log, entry) {
+    var out = log.filter(function (x) { return x.week !== entry.week; });
+    out.push(entry);
+    out.sort(function (a, b) { return Date.parse(b.saved) - Date.parse(a.saved); });
+    return out;
+  }
+
+  function mergeEntries(log, incoming) {
+    var out = log.slice(), added = 0;
+    (incoming || []).forEach(function (raw) {
+      var e = sanitizeEntry(raw);
+      if (!e) return;
+      var existing = out.filter(function (x) { return x.week === e.week; })[0];
+      if (!existing || Date.parse(e.saved) > Date.parse(existing.saved)) { out = upsertEntry(out, e); added++; }
+    });
+    return { log: out, added: added };
+  }
+
+  // Objectives from an entry as plain lines for the "last week" box.
+  function prevTextFromEntry(entry) {
+    if (!entry) return '';
+    return entry.data.objectives
+      .map(function (s) { return s.trim().replace(/^Carryover:\s*/i, ''); })
+      .filter(function (s) { return s && s !== '(need input)'; })
+      .map(function (s) { return '- ' + s; })
+      .join('\n');
+  }
+
+  function logToMarkdown(log) {
+    return log.map(function (e) {
+      var md = '## ' + e.week + (e.name ? ' (' + e.name + ')' : '') + '\n\n';
+      [['goals', 'Goals Accomplished'], ['blockers', 'Blockers / Issues'], ['objectives', 'Objectives for Next Week']].forEach(function (c) {
+        md += '**' + c[1] + '**\n';
+        e.data[c[0]].forEach(function (s, i) { md += (i + 1) + '. ' + (s || '(blank)') + '\n'; });
+        md += '\n';
+      });
+      return md;
+    }).join('');
+  }
+  // END-LOG
+
+  function loadLog() {
+    try {
+      var a = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+      if (!Array.isArray(a)) return [];
+      return a.map(sanitizeEntry).filter(Boolean);
+    } catch (e) { return []; }
+  }
+  function storeLog(a) {
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(a)); return true; } catch (e) { return false; }
+  }
+  function logMsg(msg, isErr) {
+    var m = $('logMsg'); m.textContent = msg; m.style.color = isErr ? '#c0392b' : '';
+  }
+
+  function renderLog() {
+    var list = $('logList');
+    list.textContent = '';
+    var log = loadLog();
+    if (!log.length) {
+      var empty = document.createElement('p');
+      empty.className = 'note';
+      empty.textContent = 'No saved weeks yet. Fill in the table above and click "Save to log".';
+      list.appendChild(empty);
+      return;
+    }
+    log.forEach(function (e) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--border);flex-wrap:wrap';
+      var label = document.createElement('span');
+      label.style.flex = '1 1 200px';
+      label.textContent = e.week + (e.name ? ' (' + e.name + ')' : '');
+      var open = document.createElement('button');
+      open.type = 'button'; open.textContent = 'Open';
+      open.addEventListener('click', function () {
+        buildTable(e.data);
+        $('week').value = e.week; $('name').value = e.name; updateTitle();
+        logMsg('Opened "' + e.week + '" in the table above.');
+        $('tbl').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      var del = document.createElement('button');
+      del.type = 'button'; del.textContent = 'Delete';
+      del.addEventListener('click', function () {
+        if (!confirm('Delete "' + e.week + '" from the log?')) return;
+        storeLog(loadLog().filter(function (x) { return x.week !== e.week; }));
+        renderLog(); logMsg('Deleted.');
+      });
+      row.appendChild(label); row.appendChild(open); row.appendChild(del);
+      list.appendChild(row);
+    });
+  }
+
+  $('saveLog').addEventListener('click', function () {
+    var week = $('week').value.trim();
+    if (!week) { week = weekLabel(new Date()); $('week').value = week; updateTitle(); }
+    var entry = sanitizeEntry({ week: week, name: $('name').value.trim(), saved: new Date().toISOString(), data: readTable() });
+    var log = loadLog();
+    var replacing = log.some(function (x) { return x.week === week; });
+    if (!storeLog(upsertEntry(log, entry))) {
+      return logMsg('Could not save. Your browser may be blocking local storage (private mode?). Use "Export backup" after saving, or copy for email instead.', true);
+    }
+    renderLog();
+    logMsg((replacing ? 'Updated "' : 'Saved "') + week + '". Next week, these objectives will fill in automatically.');
+  });
+
+  $('logMd').addEventListener('click', function () {
+    var log = loadLog();
+    if (!log.length) return logMsg('Nothing to copy yet.', true);
+    copyText(logToMarkdown(log), 'Log copied as Markdown.');
+    logMsg('Log copied as Markdown (' + log.length + ' week' + (log.length === 1 ? '' : 's') + ').');
+  });
+
+  $('logExport').addEventListener('click', function () {
+    var log = loadLog();
+    if (!log.length) return logMsg('Nothing to export yet.', true);
+    var blob = new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '3x3-log.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    logMsg('Backup downloaded.');
+  });
+
+  $('logImportBtn').addEventListener('click', function () { $('logImport').click(); });
+  $('logImport').addEventListener('change', function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var incoming = JSON.parse(reader.result);
+        if (!Array.isArray(incoming)) throw new Error('not a log file');
+        var res = mergeEntries(loadLog(), incoming);
+        if (!storeLog(res.log)) throw new Error('could not save to browser storage');
+        renderLog(); fillPrevFromLog();
+        logMsg('Imported ' + res.added + ' week' + (res.added === 1 ? '' : 's') + '.');
+      } catch (e) { logMsg('Import failed: ' + e.message, true); }
+    };
+    reader.readAsText(f);
+    ev.target.value = '';
+  });
+
+  $('logClear').addEventListener('click', function () {
+    if (!loadLog().length) return logMsg('The log is already empty.');
+    if (!confirm('Delete every saved week from this browser? Export a backup first if you want to keep them.')) return;
+    storeLog([]); renderLog(); fillPrevFromLog(); logMsg('Log cleared.');
+  });
+
+  // Auto-fill "last week" from the most recent saved week that is not the current one.
+  function fillPrevFromLog() {
+    var cur = $('week').value.trim();
+    var last = loadLog().filter(function (x) { return x.week !== cur; })[0];
+    var note = $('prevNote');
+    if (!last) { note.textContent = ''; return; }
+    var txt = prevTextFromEntry(last);
+    if (!$('prev').value.trim() || $('prev').getAttribute('data-auto') === '1') {
+      $('prev').value = txt;
+      $('prev').setAttribute('data-auto', '1');
+      note.textContent = txt ? 'Auto-filled from your saved log: "' + last.week + '". Edit freely.' : '';
+    }
+  }
+  $('prev').addEventListener('input', function () { $('prev').removeAttribute('data-auto'); $('prevNote').textContent = ''; });
+
+  (function initLog() {
+    if (!$('week').value.trim()) $('week').value = weekLabel(new Date());
+    var log = loadLog();
+    if (log.length && !$('name').value.trim()) $('name').value = log[0].name;
+    updateTitle();
+    renderLog();
+    fillPrevFromLog();
+  })();
 
   // restore saved key
   try {

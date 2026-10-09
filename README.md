@@ -27,6 +27,13 @@ Four ways to use it, from least to most setup:
 - **Copy prompt:** the page builds a ready-made prompt from your notes. Paste it into Claude (or any chat app) and copy the table back.
 - **Generate with Claude:** each user pastes their own Anthropic API key under "Claude API settings". The browser calls the API directly, so notes never touch any server except Anthropic's. The key is only saved locally if "Remember key" is checked.
 
+## Weekly log
+
+- Click **Save to log** under the table to store that week's report. Saving the same week label again replaces it.
+- The next time you open the page, **last week's objectives fill in automatically** (from the most recent saved week that isn't the current one), so unfinished items are flagged as "Carryover:". Your name is remembered too.
+- The Log section lists every saved week with **Open** and **Delete**, plus **Copy log as Markdown** (handy for quarterly reviews), **Export backup** and **Import backup** (JSON), and **Clear log**.
+- The log is stored in your browser's local storage on that device only. It is never uploaded, never shared with coworkers who use the same link, and it will not follow you to another browser or computer. Clearing site data erases it, so export a backup now and then.
+
 ## Notes for sharing with a team
 
 - GitHub Pages is static, so **never hardcode an API key** in `index.html`. Anyone who opens the page could read it.
