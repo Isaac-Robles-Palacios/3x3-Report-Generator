@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3x3 Report Generator</title>
+<style>
+  :root {
+    --bg: #fafaf8; --fg: #1f2328; --muted: #656d76; --card: #ffffff;
+    --border: #d8dce0; --accent: #c15f3c; --accent-fg: #ffffff; --head: #f1efe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16171a; --fg:#e8e8e6; --muted:#9aa0a6; --card:#1e2024; --border:#33363b; --head:#26282d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 8px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+  textarea, input[type=text], input[type=password] {
+    width:100%; padding:10px; border:1px solid var(--border); border-radius:8px;
+    background:var(--bg); color:var(--fg); font:inherit;
+  }
+  textarea { min-height: 170px; resize: vertical; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > * { flex:1 1 220px; }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+  button {
+    font:inherit; padding:9px 14px; border-radius:8px; border:1px solid var(--border);
+    background:var(--card); color:var(--fg); cursor:pointer;
+  }
+  button.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-fg); }
+  button:disabled { opacity:.6; cursor:wait; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  details summary { cursor:pointer; color:var(--muted); font-size:.9rem; }
+  table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  th, td { border:1px solid var(--border); padding:10px; vertical-align:top; text-align:left; }
+  th { background:var(--head); }
+  td { min-height: 48px; }
+  td:focus { outline:2px solid var(--accent); outline-offset:-2px; }
+  #status { min-height:1.4em; font-size:.9rem; margin-top:8px; color:var(--muted); }
+  #status.error { color:#c0392b; }
+  .meta { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+  .meta input { flex:1 1 200px; }
+  .note { font-size:.85rem; color:var(--muted); }
+  @media (max-width: 640px) { table, thead, tbody, tr, th, td { display:block; } thead { display:none; }
+    td::before { content: attr(data-col); display:block; font-weight:600; font-size:.8rem; color:var(--muted); } }
+  @media print { .no-print { display:none !important; } body { background:#fff; color:#000; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>3x3 Report Generator</h1>
+  <p class="sub">Paste your week's notes, get a 3-column table: 3 goals accomplished, 3 blockers, 3 objectives for next week.</p>
+
+  <section class="card no-print">
+    <h2>1. This week's notes</h2>
+    <textarea id="notes" placeholder="One item per line.&#10;&#10;Mon: shipped vendor contract review !!&#10;Tue: waiting on legal sign-off for X&#10;next: kick off onboarding project&#10;..."></textarea>
+    <p class="note" style="margin:6px 0 0">Tags make sorting more accurate: <code>done:</code> or <code>+</code> = goal, <code>blocked:</code> or <code>issue:</code> = blocker, <code>next:</code> or <code>&gt;</code> = objective, <code>!!</code> = top priority. Untagged lines are sorted by keywords like "shipped", "waiting on" and "will".</p>
+    <label for="prev">Last week's "next week" objectives (optional, so slipped items get flagged)</label>
+    <textarea id="prev" style="min-height:70px"></textarea>
+
+    <div class="actions">
+      <button class="primary" id="sort">Sort my notes into the table (no AI, no key)</button>
+      <button id="gen">Generate with Claude (optional, needs API key)</button>
+      <button id="copyPrompt">Copy prompt (use any chat app)</button>
+      <button id="blank">Start with a blank table</button>
+    </div>
+    <div id="status" role="status"></div>
+
+    <details style="margin-top:12px">
+      <summary>Claude API settings (needed only for "Generate with Claude")</summary>
+      <div class="row">
+        <div>
+          <label for="key">Anthropic API key</label>
+          <input type="password" id="key" placeholder="sk-ant-..." autocomplete="off">
+        </div>
+        <div>
+          <label for="model">Model</label>
+          <input type="text" id="model" value="claude-sonnet-5-5">
+        </div>
+      </div>
+      <label><input type="checkbox" id="remember"> Remember key in this browser only</label>
+      <p class="note">Your key and notes go straight from your browser to Anthropic. Nothing is sent to or stored on any other server. Use a key you're allowed to use for work, and don't paste confidential material your company prohibits sharing with AI tools.</p>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>2. Your 3x3 <span class="note">(click any cell to edit)</span></h2>
+    <div class="meta no-print">
+      <input type="text" id="name" placeholder="Your name">
+      <input type="text" id="week" placeholder="Week of...">
+    </div>
+    <div id="titleLine" style="font-weight:600;margin-bottom:8px"></div>
+    <table id="tbl">
+      <thead>
+        <tr><th>Goals Accomplished</th><th>Blockers / Issues</th><th>Objectives for Next Week</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="actions no-print">
+      <button id="copyEmail">Copy for email</button>
+      <button id="copyMd">Copy as Markdown</button>
+      <button id="print">Print / Save PDF</button>
+    </div>
+    <div id="extras" class="no-print" style="display:none;margin-top:16px"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var COLS = [
+    { key: 'goals', title: 'Goals Accomplished' },
+    { key: 'blockers', title: 'Blockers / Issues' },
+    { key: 'objectives', title: 'Objectives for Next Week' }
+  ];
+  var $ = function (id) { return document.getElementById(id); };
+  var tbody = $('tbl').querySelector('tbody');
+  var overflow = { goals: [], blockers: [], objectives: [] };
+
+  // ---- table helpers ----
+  function buildTable(data) {
+    tbody.textContent = '';
+    overflow = { goals: [], blockers: [], objectives: [] };
+    renderOverflow();
+    for (var r = 0; r < 3; r++) {
+      var tr = document.createElement('tr');
+      COLS.forEach(function (c) {
+        var td = document.createElement('td');
+        td.contentEditable = 'true';
+        td.setAttribute('data-col', c.title);
+        td.textContent = (data && data[c.key] && data[c.key][r]) || '';
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+  }
+  function readTable() {
+    var out = { goals: [], blockers: [], objectives: [] };
+    Array.prototype.forEach.call(tbody.rows, function (row) {
+      COLS.forEach(function (c, i) { out[c.key].push(row.cells[i].innerText.trim()); });
+    });
+    return out;
+  }
+  function titleText() {
+    var n = $('name').value.trim(), w = $('week').value.trim();
+    return [n && ('3x3 Report: ' + n), w].filter(Boolean).join(' | ');
+  }
+  function updateTitle() { $('titleLine').textContent = titleText(); }
+  buildTable();
+
+  function setStatus(msg, isErr) {
+    var s = $('status'); s.textContent = msg; s.className = isErr ? 'error' : '';
+  }
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+  }
+
+  // ---- prompt ----
+  function buildPrompt(forJson) {
+    var notes = $('notes').value.trim();
+    var prev = $('prev').value.trim();
+    var p = 'You are helping me write my weekly 3x3 report for my manager.\n\n' +
+      'Pick the 3 most important items for each category (importance, not recency):\n' +
+      '1. Goals Accomplished: outcomes, not activity\n' +
+      '2. Blockers / Issues: say what is blocking me and what I need, if known\n' +
+      '3. Objectives for Next Week: specific, tied to blockers or unfinished goals where relevant\n\n' +
+      'Rules: one sentence per item (optional short clause on impact or status). Do not invent facts. ' +
+      'If my notes lack enough for 3 items in a category, write "(need input)" for the missing ones.\n';
+    if (prev) p += '\nLast week\'s objectives (flag any that slipped inside a goal or blocker item):\n' + prev + '\n';
+    p += '\nMy notes for the week:\n' + notes + '\n\n';
+    p += forJson
+      ? 'Respond with ONLY valid JSON, no code fences, in this shape: {"goals":["","",""],"blockers":["","",""],"objectives":["","",""]}'
+      : 'Respond with a table with 3 columns (Goals Accomplished, Blockers / Issues, Objectives for Next Week) and 3 rows.';
+    return p;
+  }
+
+  // ---- generate with Claude API ----
+  $('gen').addEventListener('click', function () {
+    var notes = $('notes').value.trim();
+    var key = $('key').value.trim();
+    if (!notes) return setStatus('Add some notes first.', true);
+    if (!key) {
+      document.querySelector('details').open = true;
+      return setStatus('Add your Anthropic API key under API settings, or use "Copy prompt" instead.', true);
+    }
+    try {
+      if ($('remember').checked) localStorage.setItem('x3_key', key); else localStorage.removeItem('x3_key');
+    } catch (e) {}
+    var btn = $('gen'); btn.disabled = true; setStatus('Generating...');
+    fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: $('model').value.trim() || 'claude-sonnet-5-5',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: buildPrompt(true) }]
+      })
+    }).then(function (res) {
+      return res.json().then(function (j) {
+        if (!res.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + res.status));
+        return j;
+      });
+    }).then(function (j) {
+      var text = (j.content || []).map(function (b) { return b.text || ''; }).join('');
+      var m = text.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('Could not read the response. Try again.');
+      var data = JSON.parse(m[0]);
+      buildTable(data);
+      setStatus('Done. Review and edit the cells before sending.');
+    }).catch(function (e) {
+      setStatus('Error: ' + e.message, true);
+    }).then(function () { btn.disabled = false; });
+  });
+
+  // ---- rule-based sorter (no AI, no key) ----
+  // BEGIN-PURE
+  var TAGS = [
+    ['goals', /^(?:(?:done|win|shipped|completed|finished|accomplished)\s*:\s*|[+✓✔]\s*)/i],
+    ['blockers', /^(?:blockers?|blocked|issues?|problems?|risks?)\s*:\s*/i],
+    ['objectives', /^(?:(?:next(?: week)?|todo|to-do|plan|upcoming|objective)\s*:\s*|(?:>|→|->)\s*)/i]
+  ];
+  var KW = {
+    goals: /\b(shipped|completed?|finished|launched|delivered|resolved|fixed|merged|released|closed|presented|signed|deployed|wrapped up|published|onboarded|approved|won)\b/i,
+    blockers: /\b(blocked|blocker|waiting|stuck|delayed|delay|issue|problem|unable|failed|failing|pending|no access|risk|outage|can't|cannot|behind|slipped|escalat\w*)\b/i,
+    objectives: /\b(next week|will|plan to|planning|need to|to do|todo|going to|schedule|scheduled|kick ?off|follow up|prepare|aim to|start)\b/i
+  };
+  var PRI = /(!!|\(high\)|#p1|\bp1\b|⭐|\[!\])/gi;
+  var DAY = /^(?:mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\.?\s*[:\-–—]\s*/i;
+
+  function guess(s) {
+    var sc = {};
+    ['goals', 'blockers', 'objectives'].forEach(function (k) {
+      sc[k] = (s.match(new RegExp(KW[k].source, 'gi')) || []).length;
+    });
+    sc.blockers *= 1.5;
+    if (/next week/i.test(s)) sc.objectives += 3;
+    var best = 'goals', bv = 0;
+    ['blockers', 'objectives', 'goals'].forEach(function (k) {
+      if (sc[k] > bv) { bv = sc[k]; best = k; }
+    });
+    return best;
+  }
+
+  function parseNotes(text) {
+    var out = { goals: [], blockers: [], objectives: [] };
+    var seen = {};
+    text.split(/\r?\n/).forEach(function (raw, idx) {
+      var s = raw.replace(/^\s*(?:[-•*]|\d+[.)])\s+/, '').trim().replace(DAY, '');
+      var pri = 0;
+      s = s.replace(PRI, function () { pri = 10; return ' '; }).replace(/\s{2,}/g, ' ').trim();
+      var cat = null, explicit = 0;
+      for (var i = 0; i < TAGS.length && !cat; i++) {
+        var m = s.match(TAGS[i][1]);
+        if (m) { cat = TAGS[i][0]; s = s.slice(m[0].length).trim(); explicit = 2; }
+      }
+      if (s.length < 3) return;
+      if (!cat) cat = guess(s);
+      s = s.charAt(0).toUpperCase() + s.slice(1);
+      var key = cat + '|' + s.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = 1;
+      out[cat].push({ text: s, score: pri + explicit, idx: idx });
+    });
+    return out;
+  }
+
+  function sig(s) { return s.toLowerCase().match(/[a-z0-9]{5,}/g) || []; }
+
+  function addCarryover(out, prevText) {
+    var done = {};
+    out.goals.forEach(function (g) { sig(g.text).forEach(function (w) { done[w] = 1; }); });
+    prevText.split(/\r?\n/).forEach(function (raw) {
+      var s = raw.replace(/^\s*(?:[-•*]|\d+[.)])\s+/, '').trim();
+      if (s.length < 3) return;
+      var words = sig(s);
+      var hit = words.filter(function (w) { return done[w]; }).length;
+      if (!words.length || hit / words.length < 0.4) {
+        out.objectives.push({ text: 'Carryover: ' + s, score: 5, idx: -1 });
+      }
+    });
+  }
+  // END-PURE
+
+  function sortNotes() {
+    var notes = $('notes').value.trim();
+    if (!notes) return setStatus('Add some notes first.', true);
+    var out = parseNotes(notes);
+    var prev = $('prev').value.trim();
+    if (prev) addCarryover(out, prev);
+    var data = {}, extra = {};
+    COLS.forEach(function (c) {
+      var arr = out[c.key].slice().sort(function (a, b) { return b.score - a.score || a.idx - b.idx; });
+      data[c.key] = arr.slice(0, 3).map(function (x) { return x.text; });
+      while (data[c.key].length < 3) data[c.key].push('(need input)');
+      extra[c.key] = arr.slice(3).map(function (x) { return x.text; });
+    });
+    buildTable(data);
+    overflow = extra;
+    renderOverflow();
+    setStatus('Sorted by tags and keywords. Check each cell, and swap in anything that was left out below the table.');
+  }
+
+  function renderOverflow() {
+    var box = $('extras');
+    box.textContent = '';
+    var any = false;
+    COLS.forEach(function (c, ci) {
+      var items = overflow[c.key] || [];
+      if (!items.length) return;
+      any = true;
+      var h = document.createElement('div');
+      h.className = 'note';
+      h.style.marginTop = '8px';
+      h.textContent = c.title + ': items that did not fit (click one to swap it into row 3)';
+      box.appendChild(h);
+      items.forEach(function (text, i) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        b.style.cssText = 'display:block;margin:4px 0;text-align:left;width:100%';
+        b.addEventListener('click', function () {
+          var cell = tbody.rows[2].cells[ci];
+          var old = cell.innerText.trim();
+          cell.textContent = text;
+          if (old && old !== '(need input)') overflow[c.key][i] = old;
+          else overflow[c.key].splice(i, 1);
+          renderOverflow();
+        });
+        box.appendChild(b);
+      });
+    });
+    box.style.display = any ? 'block' : 'none';
+  }
+
+  $('sort').addEventListener('click', sortNotes);
+
+  // ---- other buttons ----
+  $('copyPrompt').addEventListener('click', function () {
+    if (!$('notes').value.trim()) return setStatus('Add some notes first.', true);
+    copyText(buildPrompt(false), 'Prompt copied. Paste it into Claude or any chat app.');
+  });
+  $('blank').addEventListener('click', function () { buildTable(); setStatus('Blank table ready. Click cells to type.'); });
+  ['name', 'week'].forEach(function (id) { $(id).addEventListener('input', updateTitle); });
+
+  function copyText(text, okMsg) {
+    var done = function () { setStatus(okMsg); };
+    var fail = function () { setStatus('Copy failed. Select the text manually.', true); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fail);
+    else fail();
+  }
+
+  $('copyEmail').addEventListener('click', function () {
+    var d = readTable(), t = titleText();
+    var cell = 'border:1px solid #999;padding:8px;vertical-align:top;';
+    var html = (t ? '<p><strong>' + esc(t) + '</strong></p>' : '') +
+      '<table style="border-collapse:collapse;width:100%"><thead><tr>' +
+      COLS.map(function (c) { return '<th style="' + cell + 'background:#f1efe9;text-align:left">' + c.title + '</th>'; }).join('') +
+      '</tr></thead><tbody>';
+    for (var r = 0; r < 3; r++) {
+      html += '<tr>' + COLS.map(function (c) { return '<td style="' + cell + '">' + esc(d[c.key][r]) + '</td>'; }).join('') + '</tr>';
+    }
+    html += '</tbody></table>';
+    var plain = COLS.map(function (c) { return c.title + ':\n' + d[c.key].map(function (x, i) { return (i + 1) + '. ' + x; }).join('\n'); }).join('\n\n');
+    if (navigator.clipboard && window.ClipboardItem) {
+      navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([plain], { type: 'text/plain' })
+      })]).then(function () { setStatus('Copied. Paste into your email.'); },
+                function () { setStatus('Copy failed. Try "Copy as Markdown".', true); });
+    } else {
+      setStatus('Rich copy not supported in this browser. Use Markdown or Print.', true);
+    }
+  });
+
+  $('copyMd').addEventListener('click', function () {
+    var d = readTable(), t = titleText();
+    var clean = function (s) { return (s || '').replace(/\|/g, '\\|').replace(/\n+/g, ' '); };
+    var md = (t ? '**' + t + '**\n\n' : '') +
+      '| ' + COLS.map(function (c) { return c.title; }).join(' | ') + ' |\n' +
+      '| --- | --- | --- |\n';
+    for (var r = 0; r < 3; r++) md += '| ' + COLS.map(function (c) { return clean(d[c.key][r]); }).join(' | ') + ' |\n';
+    copyText(md, 'Markdown copied. Works in Slack canvases, Notion, GitHub and more.');
+  });
+
+  $('print').addEventListener('click', function () { window.print(); });
+
+  // restore saved key
+  try {
+    var k = localStorage.getItem('x3_key');
+    if (k) { $('key').value = k; $('remember').checked = true; }
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
